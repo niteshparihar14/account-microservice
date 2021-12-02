@@ -1,0 +1,17 @@
+{"properties": [
+  {
+    "name": "logging.jpa.show-sql",
+    "type": "java.lang.String",
+    "description": "A description for 'logging.jpa.show-sql'"
+  },
+  {
+    "name": "logging.jpa.hibernate.ddl-auto",
+    "type": "java.lang.String",
+    "description": "A description for 'logging.jpa.hibernate.ddl-auto'"
+  },
+  {
+    "name": "logging.application.name",
+    "type": "java.lang.String",
+    "description": "A description for 'logging.application.name'"
+  }
+]}
