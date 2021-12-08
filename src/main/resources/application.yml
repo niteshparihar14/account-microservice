@@ -11,6 +11,8 @@ spring:
       ddl-auto: update
   application:
     name: account-service
+      main:    allow-circular-references: true
+      mvc:    pathmatch:      matching-strategy: ant-path-matcher
     
 eureka:
   client:

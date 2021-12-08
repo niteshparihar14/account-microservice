@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.format.annotation.DateTimeFormat.ISO;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,6 +34,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 @RestController
 @RequestMapping(path = "/api/v1")
+@Transactional(rollbackFor={Exception.class})
 public class AccountController {
 
 	@Autowired
@@ -43,6 +45,11 @@ public class AccountController {
 
 	private static ObjectMapper mapper = new ObjectMapper();
 
+	/**
+	 * @param id
+	 * @return
+	 * @apiNote API to fetch account details by accountId
+	 */
 	@GetMapping(path = "/accounts/{id}")
 	public ResponseEntity<Account> getAccount(@PathVariable("id") Long id) {
 
@@ -55,6 +62,10 @@ public class AccountController {
 		return ResponseEntity.ok().body(account);
 	}
 
+	/**
+	 * @return
+	 * @apiNote API to fetch all account details
+	 */
 	@GetMapping(path = "/accounts")
 	public ResponseEntity<List<Account>> getAllAccount() {
 
@@ -67,6 +78,12 @@ public class AccountController {
 		return ResponseEntity.ok().body(account);
 	}
 
+	/**
+	 * @param account
+	 * @return
+	 * @throws JsonProcessingException
+	 * @apiNote API to perform add account
+	 */
 	@PostMapping(path = "/account")
 	public ResponseEntity<Account> addEntity(@RequestBody Account account) throws JsonProcessingException {
 
@@ -89,6 +106,12 @@ public class AccountController {
 		}
 	}
 
+	/**
+	 * @param transaction
+	 * @return
+	 * @throws JsonProcessingException
+	 * @apiNote API to perform credit/debit
+	 */
 	@PostMapping(path = "/account/transaction")
 	public ResponseEntity<Transaction> addTransaction(@RequestBody Transaction transaction)
 			throws JsonProcessingException {
@@ -117,9 +140,9 @@ public class AccountController {
 			throw new RuntimeException("Low account balance");
 		}
 
-		Transaction addedObject = this.service.addTransaction(transaction);
+		Transaction addedTransaction = this.service.addTransaction(transaction);
 
-		if (addedObject == null) {
+		if (addedTransaction == null) {
 			throw new RuntimeException("Transaction failed");
 		}
 
@@ -143,6 +166,15 @@ public class AccountController {
 		return ResponseEntity.created(location).body(transaction);
 	}
 	
+	/**
+	 * @param id
+	 * @param startTime
+	 * @param endTime
+	 * @param sort
+	 * @param sortOrder
+	 * @return
+	 * @apiNote API to fetch the statement
+	 */
 	@GetMapping(path = "/accounts/{id}/statement")
 	public ResponseEntity<List<Transaction>> getStatementByAccountId(@PathVariable("id") Long id,
 			@RequestParam(required = false)  @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime startTime,
