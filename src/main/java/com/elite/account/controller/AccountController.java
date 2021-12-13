@@ -5,7 +5,6 @@ import java.net.URI;
 import java.time.LocalDateTime;
 import java.util.List;
 
-import org.apache.commons.lang.RandomStringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.format.annotation.DateTimeFormat.ISO;
@@ -23,25 +22,33 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import com.elite.account.entity.Account;
 import com.elite.account.entity.Transaction;
-import com.elite.account.enums.TransactionStatus;
 import com.elite.account.enums.TransactionType;
-import com.elite.account.model.Notification;
+import com.elite.account.event.LoanAccountEvent;
+import com.elite.account.event.LoanAccountEvent.Status;
+import com.elite.account.event.TransactionEvent;
+import com.elite.account.kafka.source.TransactionPlacedEventSource;
+import com.elite.account.model.LoanRequest;
+import com.elite.account.model.TransactionRequest;
+import com.elite.account.model.User;
 import com.elite.account.service.AccountService;
-import com.elite.account.utils.Producer;
+import com.elite.account.utils.WebClientHandler;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 @RestController
 @RequestMapping(path = "/api/v1")
-@Transactional(rollbackFor={Exception.class})
+@Transactional(rollbackFor = { Exception.class })
 public class AccountController {
 
 	@Autowired
 	private AccountService service;
 
 	@Autowired
-	private Producer producer;
+	private TransactionPlacedEventSource transactionPlacedEventSource;
+
+	@Autowired
+	private WebClientHandler client;
 
 	private static ObjectMapper mapper = new ObjectMapper();
 
@@ -58,6 +65,24 @@ public class AccountController {
 		if (account == null) {
 			throw new RuntimeException("Account not found");
 		}
+
+		return ResponseEntity.ok().body(account);
+	}
+
+	@PostMapping(path = "/account/validate")
+	public ResponseEntity<Account> validateLoanRequest(@RequestBody LoanRequest request) {
+
+		Account account = this.service.fetchAccountById(request.getAccountId());
+
+		LoanAccountEvent event = null;
+		if (account == null || account.getBalance().compareTo(new BigDecimal(200000.00)) == -1) {
+			event = new LoanAccountEvent(request.getLoanId(), account.getCustomerId(), Status.FAILURE);
+			transactionPlacedEventSource.publishAccountEvent(event);
+			return ResponseEntity.ok().body(account);
+		}
+
+		event = new LoanAccountEvent(request.getLoanId(), account.getCustomerId(), Status.SUCCESS);
+		transactionPlacedEventSource.publishAccountEvent(event);
 
 		return ResponseEntity.ok().body(account);
 	}
@@ -95,10 +120,9 @@ public class AccountController {
 
 			mapper.registerModule(new JavaTimeModule());
 
-			Notification notification = new Notification();
+			TransactionEvent notification = new TransactionEvent();
 			notification.setCustomerId(addedObject.getCustomerId());
 			notification.setMessage("Account created successfully");
-			producer.kafkaProducer(notification);
 
 			return ResponseEntity.created(location).body(account);
 		} else {
@@ -113,59 +137,48 @@ public class AccountController {
 	 * @apiNote API to perform credit/debit
 	 */
 	@PostMapping(path = "/account/transaction")
-	public ResponseEntity<Transaction> addTransaction(@RequestBody Transaction transaction)
+	public ResponseEntity<Transaction> addTransaction(@RequestBody TransactionRequest request)
 			throws JsonProcessingException {
 
-		LocalDateTime now = LocalDateTime.now();
-		String transactionRefId = RandomStringUtils.randomAlphanumeric(12);
-		transaction.setTransactionTime(now);
-		transaction.setTransactionRefId(transactionRefId);
-
-		Account account = service.fetchAccountById(transaction.getAccountId());
+		Account account = service.fetchAccountById(request.getAccountId());
 
 		if (account == null) {
 			throw new RuntimeException("Invalid account id");
 		}
 
-		transaction.setStatus(TransactionStatus.SUCCESS);
-
 		BigDecimal updatedBalance = null;
 
-		if (TransactionType.CREDIT.equals(transaction.getTransactionType())) {
-			updatedBalance = account.getBalance().add(transaction.getAmount());
-		} else if (TransactionType.DEBIT.equals(transaction.getTransactionType())
-				&& account.getBalance().compareTo(transaction.getAmount()) == 1) {
-			updatedBalance = account.getBalance().subtract(transaction.getAmount());
+		if (TransactionType.CREDIT.equals(request.getTransactionType())) {
+			updatedBalance = account.getBalance().add(request.getAmount());
+		} else if (TransactionType.DEBIT.equals(request.getTransactionType())
+				&& account.getBalance().compareTo(request.getAmount()) == 1) {
+			updatedBalance = account.getBalance().subtract(request.getAmount());
 		} else {
 			throw new RuntimeException("Low account balance");
 		}
 
-		Transaction addedTransaction = this.service.addTransaction(transaction);
+		User user = client.getCustomer(account.getCustomerId());
+
+		Transaction addedTransaction = this.service.addTransaction(request);
 
 		if (addedTransaction == null) {
 			throw new RuntimeException("Transaction failed");
 		}
 
 		URI location = ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}")
-				.buildAndExpand(transaction.getId()).toUri();
+				.buildAndExpand(addedTransaction.getId()).toUri();
 
-		mapper.registerModule(new JavaTimeModule());
+		transactionPlacedEventSource.publishTransactionEvent(addedTransaction, user);
 
-		Notification notification = new Notification();
-		notification.setCustomerId(account.getCustomerId());
-		notification.setMessage(transaction.getTransactionType() + " transaction success");
-		
-		producer.kafkaProducer(notification);
-		
 		account.setBalance(updatedBalance);
 
-		if(service.updateAccount(account) == null) {
+		if (service.updateAccount(account) == null) {
 			throw new RuntimeException("Failed to update account");
 		}
 
-		return ResponseEntity.created(location).body(transaction);
+		return ResponseEntity.created(location).body(addedTransaction);
 	}
-	
+
 	/**
 	 * @param id
 	 * @param startTime
@@ -177,10 +190,9 @@ public class AccountController {
 	 */
 	@GetMapping(path = "/accounts/{id}/statement")
 	public ResponseEntity<List<Transaction>> getStatementByAccountId(@PathVariable("id") Long id,
-			@RequestParam(required = false)  @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime startTime,
-			@RequestParam(required = false)  @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime endTime,
-			@RequestParam(required = false)  String sort,
-			@RequestParam(required = false)  String sortOrder) {
+			@RequestParam(required = false) @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime startTime,
+			@RequestParam(required = false) @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime endTime,
+			@RequestParam(required = false) String sort, @RequestParam(required = false) String sortOrder) {
 
 		List<Transaction> statements = this.service.fetchStatementByAccountId(id, startTime, endTime, sort, sortOrder);
 
