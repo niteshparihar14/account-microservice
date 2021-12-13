@@ -1,7 +1,6 @@
 package com.elite.account.entity;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 import javax.persistence.Column;
@@ -17,16 +16,12 @@ import org.springframework.format.annotation.DateTimeFormat.ISO;
 import com.elite.account.enums.TransactionStatus;
 import com.elite.account.enums.TransactionType;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "transaction")
+@Table(name = "transaction_table")
 
 @Data
-@NoArgsConstructor
-@AllArgsConstructor
 public class Transaction {
 
 	@Id
@@ -46,6 +41,9 @@ public class Transaction {
 	@Column(name = "amount")
 	private BigDecimal amount;
 
+	@Column(name = "from")
+	private Long from;
+	
 	@Column(name = "transactiontime")
 	@DateTimeFormat(iso = ISO.DATE_TIME)
 	private LocalDateTime transactionTime;

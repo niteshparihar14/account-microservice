@@ -3,6 +3,7 @@ package com.elite.account.service;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -10,8 +11,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.elite.account.entity.Account;
 import com.elite.account.entity.Transaction;
+import com.elite.account.enums.TransactionStatus;
+import com.elite.account.model.TransactionRequest;
 import com.elite.account.repository.AccountRepository;
 import com.elite.account.repository.TransactionRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
 
 import lombok.AllArgsConstructor;
 
@@ -62,7 +66,18 @@ public class AccountService {
 	 * @return
 	 */
 	@Transactional
-	public Transaction addTransaction(Transaction transaction) {
+	public Transaction addTransaction(TransactionRequest request) {
+		Account account = accountRepository.findById(request.getAccountId()).get();
+		Transaction transaction = new Transaction();
+		LocalDateTime now = LocalDateTime.now();
+		String transactionRefId = RandomStringUtils.randomAlphanumeric(12);
+		transaction.setTransactionTime(now);
+		transaction.setTransactionRefId(transactionRefId);
+		transaction.setStatus(TransactionStatus.SUCCESS);
+		transaction.setAccountId(account.getId());
+		transaction.setAmount(request.getAmount());
+		transaction.setTransactionType(request.getTransactionType());
+		transaction.setFrom(request.getFrom());
 		return this.transactionRepository.save(transaction);
 	}
 
@@ -107,4 +122,22 @@ public class AccountService {
 		}
 		return Sort.by(Sort.Direction.ASC, sort);
     }
+	
+	/**
+	 * @param transaction
+	 * @param account
+	 * @throws JsonProcessingException
+	 */
+	public void sendTransactionNotification(Transaction transaction, Account account ) throws JsonProcessingException {
+//		ObjectMapper mapper = new ObjectMapper();
+//		
+//		mapper.registerModule(new JavaTimeModule());
+//
+//		TransactionEvent notification = new TransactionEvent();
+//		notification.setCustomerId(account.getCustomerId());
+//		notification.setMessage(transaction.getTransactionType() + " transaction success");
+//		
+//		producer.kafkaProducer(notification);
+		
+	}
 }
